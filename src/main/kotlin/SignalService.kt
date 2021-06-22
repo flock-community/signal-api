@@ -78,36 +78,25 @@ class SignalService(
         PersistentStore.save(resource, model)
     }
 
-    fun receive(): Optional<Message> {
+    fun receive(): List<Message> {
         val messageReceiver = SignalServiceMessageReceiver(Constants.config, accountManager.ownUuid, signalConfiguration.username, signalConfiguration.password, null, Constants.USER_AGENT, PipeConnectivityListener(), UptimeSleepTimer())
-        val messagePipe = messageReceiver.createMessagePipe()
+        val messages = messageReceiver.retrieveMessages()
 
         val validator = CertificateValidator(Curve.decodePoint(Base64.decode(Constants.UNIDENTIFIED_SENDER_TRUST_ROOT), 0));
         val cipher = SignalServiceCipher(SignalServiceAddress(accountManager.ownUuid, signalConfiguration.username), protocolStore, validator)
 
-        try {
-            val envelope: SignalServiceEnvelope = messagePipe.read(5, TimeUnit.SECONDS)
-            val message: SignalServiceContent = cipher.decrypt(envelope)
-            return if (message.dataMessage.isPresent) {
-                if (message.dataMessage.get().body.isPresent) {
-                    val body = message.dataMessage.get().body.get()
-                    Optional.of(Message(
-                            number = message.sender.number.get(),
-                            text = body
-                    ))
-                } else {
-                    Optional.absent()
+        return messages
+                .mapNotNull { cipher.decrypt(it) }
+                .filter {it.dataMessage.isPresent}
+                .filter {it.dataMessage.get().body.isPresent}
+                .map {
+                    Message(
+                            number = it.sender.number.get(),
+                            text = it.dataMessage.get().body.get()
+                    )
                 }
-            } else {
-                Optional.absent()
-            }
-        } catch (ex: Exception) {
-            println(ex)
-            return Optional.absent()
-        } finally {
-            messagePipe.shutdown()
-            PersistentStore.save(resource, model)
-        }
+
+        PersistentStore.save(resource, model)
     }
 
     fun send(message: Message) {
@@ -116,6 +105,8 @@ class SignalService(
             val sender = SignalServiceAddress(Optional.absent(), Optional.fromNullable(message.number))
             val responseData = SignalServiceDataMessage.newBuilder().withBody(message.text).build()
             messageSender.sendMessage(sender, Optional.absent(), responseData)
+        } catch (ex: Exception) {
+            throw ex
         } finally {
             PersistentStore.save(resource, model)
         }

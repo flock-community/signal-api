@@ -16,8 +16,8 @@ class Controllers(
     }
 
     @GetMapping("/receive")
-    fun receive(): Message? {
-        return signalSignalService.receive().orNull()
+    fun receive(): List<Message> {
+        return signalSignalService.receive()
     }
 
     @GetMapping("/refresh")
